@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"database/sql"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -100,30 +101,22 @@ func (p proc) match(substr string) (int, error) {
 }
 
 type mysql struct {
-	db              *sql.DB
+	entry           *dsnentry
 	queryPages      string
 	queryCachePages string
 }
 
-func newMysql(dsn, cacheTable string) (*mysql, error) {
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		return nil, err
-	}
-	m := &mysql{
-		db:              db,
+func newMysql(entry *dsnentry, cacheTable string) *mysql {
+	return &mysql{
+		entry:           entry,
 		queryPages:      queryPages,
 		queryCachePages: fmt.Sprintf(queryCachePages, cacheTable),
 	}
-	if err := m.db.Ping(); err != nil {
-		return nil, err
-	}
-	return m, nil
 }
 
 func (m *mysql) count(query string) (int, error) {
 	var cnt int
-	row := m.db.QueryRow(query)
+	row := m.entry.db.QueryRow(query)
 	if err := row.Scan(&cnt); err != nil {
 		return 0, err
 	}
@@ -138,19 +131,15 @@ func (m *mysql) cached() (int, error) {
 	return m.count(m.queryCachePages)
 }
 
-func (m *mysql) close() {
-	m.db.Close()
-}
-
 type results struct {
-	point *point
-	ch    chan *result
+	dbs dsnmap
+	ch  chan *result
 }
 
-func newResults(p *point) *results {
+func newResults(dbs dsnmap) *results {
 	return &results{
-		point: p,
-		ch:    make(chan *result),
+		dbs: dbs,
+		ch:  make(chan *result),
 	}
 }
 
@@ -161,74 +150,264 @@ func (r *results) collect() {
 	}
 }
 
-func (r *results) taskProc(d time.Duration, dir, match string) *task {
+func (r *results) taskProc(d time.Duration, p *point, opts map[string]string) (*task, error) {
 	name := "http_processes"
-	return newTask(name, d, func() error {
+	dir, ok := opts["dir"]
+	if !ok {
+		dir = "/proc"
+	}
+	match, ok := opts["match"]
+	if !ok {
+		match = "httpd"
+	}
+	return newTask(name, d, p, func(p *point) error {
 		proc := proc(dir)
 		n, err := proc.match(match)
 		if err != nil {
 			return err
 		}
-		r.ch <- newResult(name, fmt.Sprintf("%d", n), r.point)
+		r.ch <- newResult(name, fmt.Sprintf("%d", n), p)
 		return nil
-	})
+	}), nil
 }
 
-func (r *results) taskMysqlPages(d time.Duration, db *mysql) *task {
+func (r *results) taskMysqlPages(d time.Duration, p *point, opts map[string]string) (*task, error) {
 	name := "mysql_pages"
-	return newTask(name, d, func() error {
+	dbname, ok := opts["db"]
+	if !ok {
+		return nil, fmt.Errorf("required option 'db'")
+	}
+	dbent, ok := r.dbs[dbname]
+	if !ok {
+		return nil, fmt.Errorf("database connection %s not defined; define it using -mysql", dbname)
+	}
+	if err := dbent.connect(); err != nil {
+		return nil, err
+	}
+	// TODO: this is ugly that an unneeded arg is defaulted
+	db := newMysql(dbent, "")
+	return newTask(name, d, p, func(p *point) error {
 		n, err := db.pages()
 		if err != nil {
 			return err
 		}
-		r.ch <- newResult(name, fmt.Sprintf("%d", n), r.point)
+		r.ch <- newResult(name, fmt.Sprintf("%d", n), p)
 		return nil
-	})
+	}), nil
 }
 
-func (r *results) taskMysqlCachedPages(d time.Duration, db *mysql) *task {
+func (r *results) taskMysqlCachedPages(d time.Duration, p *point, opts map[string]string) (*task, error) {
 	name := "mysql_cached_pages"
-	return newTask(name, d, func() error {
+	dbname, ok := opts["db"]
+	if !ok {
+		return nil, fmt.Errorf("required option 'db'")
+	}
+	dbent, ok := r.dbs[dbname]
+	if !ok {
+		return nil, fmt.Errorf("database connection %s not defined; define it using -mysql", dbname)
+	}
+	if err := dbent.connect(); err != nil {
+		return nil, err
+	}
+	table, ok := opts["table"]
+	if !ok {
+		table = "cf_cache_pages_tags"
+	}
+	db := newMysql(dbent, table)
+	return newTask(name, d, p, func(p *point) error {
 		n, err := db.cached()
 		if err != nil {
 			return err
 		}
-		r.ch <- newResult(name, fmt.Sprintf("%d", n), r.point)
+		r.ch <- newResult(name, fmt.Sprintf("%d", n), p)
 		return nil
-	})
+	}), nil
+}
+
+type dsnentry struct {
+	dsn string
+	db  *sql.DB
+	err error
+}
+
+func (e *dsnentry) connect() error {
+	// Already tried, but there was an error.
+	if e.err != nil {
+		return e.err
+	}
+	// Already connected successfully.
+	if e.db != nil {
+		return nil
+	}
+	e.db, e.err = connectMysql(e.dsn)
+	if e.err != nil {
+		e.err = fmt.Errorf("cannot connect to database: %s", e.err)
+	}
+	return e.err
+}
+
+func connectMysql(dsn string) (*sql.DB, error) {
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Ping(); err != nil {
+		return nil, err
+	}
+	return db, nil
+}
+
+type dsnmap map[string]*dsnentry
+
+func (m dsnmap) String() string {
+	if len(m) == 0 {
+		return "name=user:password@tcp(localhost:3306)/database"
+	}
+	// TODO: make nicer, print key=val.dsn
+	return fmt.Sprintf("[array %d]", len(m))
+}
+
+func (m dsnmap) Set(v string) error {
+	parts := strings.SplitN(v, "=", 2)
+	if _, ok := m[parts[0]]; ok {
+		return fmt.Errorf("duplicated mysql DSN %s", parts[0])
+	}
+	m[parts[0]] = &dsnentry{dsn: parts[1]}
+	return nil
+}
+
+type checks map[string]map[string]string // check name : [options]
+
+func parseChecks(s string) (checks, error) {
+	parts := strings.Split(s, ",")
+	cs := checks(make(map[string]map[string]string))
+	var (
+		name string
+		opts map[string]string
+	)
+	for i := range parts {
+		if name == "" {
+			name = parts[i]
+			if _, ok := cs[name]; ok {
+				return nil, fmt.Errorf("check %s repeated", name)
+			}
+			continue
+		}
+		if !strings.ContainsRune(parts[i], '=') {
+			cs[name] = opts
+			name = parts[i]
+			opts = nil
+			continue
+		}
+		if opts == nil {
+			opts = make(map[string]string)
+		}
+		optparts := strings.SplitN(parts[i], "=", 2)
+		if _, ok := opts[optparts[0]]; ok {
+			return nil, fmt.Errorf("check %s: option %s repeated", name, optparts[0])
+		}
+		opts[optparts[0]] = optparts[1]
+	}
+	if name != "" {
+		if _, ok := cs[name]; ok {
+			return nil, fmt.Errorf("check %s repeated", name)
+		}
+		cs[name] = opts
+	}
+	return cs, nil
+}
+
+type products map[string]checks
+
+func (p products) parse(s string) error {
+	parts := strings.SplitN(s, ":", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("%s should be in format PRODUCT.STAGE:CHECK,ARGS...,CHECK,ARGS...", s)
+	}
+	if _, ok := p[parts[0]]; ok {
+		return fmt.Errorf("system %s specified more than once", parts[0])
+	}
+	cs, err := parseChecks(parts[1])
+	if err != nil {
+		return fmt.Errorf("cannot parse checks for system %s: %s", parts[0], err)
+	}
+	p[parts[0]] = cs
+	return nil
+}
+
+type taskMaker func(every time.Duration, point *point, opts map[string]string) (*task, error)
+
+type tasks map[string]taskMaker
+
+func (ts tasks) setup(task string, p *point, opts map[string]string) (*task, error) {
+	fn, ok := ts[task]
+	if !ok {
+		return nil, errors.New("not a valid task")
+	}
+	val, ok := opts["every"]
+	if !ok {
+		return nil, errors.New("options 'every' is required")
+	}
+	every, err := time.ParseDuration(val)
+	if err != nil {
+		return nil, fmt.Errorf("option 'every' is invalid: %s", err)
+	}
+	t, err := fn(every, p, opts)
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+func initProducts(prods products, res *results) ([]*task, error) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return nil, fmt.Errorf("cannot read hostname: %s", err)
+	}
+	ts := make([]*task, 0)
+	var tsmap tasks = map[string]taskMaker{
+		"proc":   res.taskProc,
+		"pages":  res.taskMysqlPages,
+		"cached": res.taskMysqlCachedPages,
+	}
+	for name, checks := range prods {
+		parts := strings.SplitN(name, ".", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("%s should be in format SYSTEM.STAGE", name)
+		}
+		point := &point{hostname, parts[0], parts[1]}
+		for cname, opts := range checks {
+			t, err := tsmap.setup(cname, point, opts)
+			if err != nil {
+				return nil, fmt.Errorf("%s: task %s: %s", name, cname, err)
+			}
+			ts = append(ts, t)
+		}
+	}
+	return ts, nil
 }
 
 func main() {
-	// TODO: these should be per group of task
-	product := flag.String("product", "", "Name of product monitored")
-	stage := flag.String("stage", "prod", "Stage of product monitored")
-	cacheTable := flag.String("mysql-cached-table", "cf_cache_pages_tags", "Name of Caching Framework cache_pages_tags table")
-	dsn := flag.String("mysql-dsn", "user:password@tcp(localhost:3306)/database", "DSN to connect to database")
+	dsnmap := dsnmap(make(map[string]*dsnentry))
+	flag.Var(dsnmap, "mysql", "Named DSN to connect to database")
 	nworkers := flag.Int("workers", 1, "Number of parallel task runners")
 	flag.Parse()
 
-	if *product == "" {
-		log.Fatalf("error: -product is mandatory")
+	prods := products(make(map[string]checks))
+	args := flag.Args()
+	for _, arg := range args {
+		if err := prods.parse(arg); err != nil {
+			log.Fatal(err)
+		}
 	}
-	hostname, err := os.Hostname()
+	results := newResults(dsnmap)
+	ts, err := initProducts(prods, results)
 	if err != nil {
 		log.Fatalf("error: %s", err)
 	}
-	// TODO: table names should be given in tasks, not here.
-	db, err := newMysql(*dsn, *cacheTable)
-	if err != nil {
-		log.Fatalf("error: %s", err)
+	if len(ts) == 0 {
+		log.Fatalf("no tasks to run, exiting")
 	}
-	point := &point{hostname, *product, *stage}
-	results := newResults(point)
-
-	// TODO: make this dynamic based on args
-	ts := make([]*task, 0)
-	// TODO: Interval times should be from arguments
-	ts = append(ts, results.taskProc(10*time.Minute, "/proc", "httpd"))
-	ts = append(ts, results.taskMysqlPages(25*time.Minute, db))
-	ts = append(ts, results.taskMysqlCachedPages(30*time.Minute, db))
-	// TODO: write test to count HTTP requests from logs?
 
 	sched := newScheduler(ts, *nworkers)
 	go sched.schedule()

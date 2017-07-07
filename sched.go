@@ -6,18 +6,20 @@ import (
 	"time"
 )
 
-type taskFn func() error
+type taskFn func(p *point) error
 
 type task struct {
 	name   string
+	point  *point
 	fn     taskFn
 	repeat time.Duration
 	left   time.Duration
 }
 
-func newTask(name string, interval time.Duration, fn taskFn) *task {
+func newTask(name string, interval time.Duration, p *point, fn taskFn) *task {
 	return &task{
 		name:   name,
+		point:  p,
 		fn:     fn,
 		repeat: interval,
 	}
@@ -50,7 +52,7 @@ func newScheduler(ts []*task, nworkers int) *scheduler {
 
 func (s *scheduler) work() {
 	for task := range s.ch {
-		if err := task.fn(); err != nil {
+		if err := task.fn(task.point); err != nil {
 			log.Printf("error: %s: %s", task.name, err)
 		}
 	}
