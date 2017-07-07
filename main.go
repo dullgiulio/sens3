@@ -101,6 +101,7 @@ func (p proc) match(substr string) (int, error) {
 
 type mysql struct {
 	db              *sql.DB
+	dsn				string
 	queryPages      string
 	queryCachePages string
 }
@@ -112,6 +113,7 @@ func newMysql(dsn, cacheTable string) (*mysql, error) {
 	}
 	m := &mysql{
 		db:              db,
+		dsn:			 dsn,
 		queryPages:      queryPages,
 		queryCachePages: fmt.Sprintf(queryCachePages, cacheTable),
 	}
@@ -198,18 +200,42 @@ func (r *results) taskMysqlCachedPages(d time.Duration, db *mysql) *task {
 	})
 }
 
+type dsnmap map[string]*mysql
+
+func (m dsnmap) String() string {
+	if len(m) == 0 {
+		return "name=user:password@tcp(localhost:3306)/database"
+	}
+	// TODO: make nicer, print key=val.dsn
+	return fmt.Sprintf("[array %d]", len(m))
+}
+
+func (m dsnmap) Set(v string) error {
+	parts := strings.SplitN(v, "=", 2)
+	if _, ok := m[parts[0]]; ok {
+		return fmt.Errorf("duplicated mysql DSN %s", parts[0])
+	}
+	// TODO: Cache table cannot be set here!
+	db, err := newMysql(parts[1], "cf_cache_pages_tags")
+	if err != nil {
+		return fmt.Errorf("cannot init mysql connection %s: %s", parts[0], err)
+	}
+	m[parts[0]] = db
+	return nil
+}
+
+// TODO: Parse: sens3 -mysql portal='DSN' portal.dev:pages,every=10m,db=portal,cached,every=15m,db=portal,proc,every=5m,match=httpd ...
+
 func main() {
-	// TODO: these should be per group of task
-	product := flag.String("product", "", "Name of product monitored")
-	stage := flag.String("stage", "prod", "Stage of product monitored")
-	cacheTable := flag.String("mysql-cached-table", "cf_cache_pages_tags", "Name of Caching Framework cache_pages_tags table")
-	dsn := flag.String("mysql-dsn", "user:password@tcp(localhost:3306)/database", "DSN to connect to database")
-	nworkers := flag.Int("workers", 1, "Number of parallel task runners")
+	dsnmap := dsnmap(make(map[string]*mysql))
+	flag.Var(dsnmap, "mysql", "Named DSN to connect to database")
+	// TODO: this becomes per test
+	//cacheTable := flag.String("mysql-cached-table", "cf_cache_pages_tags", "Name of Caching Framework cache_pages_tags table")
+	//nworkers := flag.Int("workers", 1, "Number of parallel task runners")
 	flag.Parse()
 
-	if *product == "" {
-		log.Fatalf("error: -product is mandatory")
-	}
+	log.Printf("%+v\n", dsnmap)
+	/*
 	hostname, err := os.Hostname()
 	if err != nil {
 		log.Fatalf("error: %s", err)
@@ -233,4 +259,5 @@ func main() {
 	sched := newScheduler(ts, *nworkers)
 	go sched.schedule()
 	results.collect()
+	*/
 }
