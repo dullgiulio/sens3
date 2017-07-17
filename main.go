@@ -100,32 +100,22 @@ func (p proc) match(substr string) (int, error) {
 }
 
 type mysql struct {
-	db              *sql.DB
-	dsn				string
+	entry           *dsnentry
 	queryPages      string
 	queryCachePages string
 }
 
-func newMysql(dsn, cacheTable string) (*mysql, error) {
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		return nil, err
-	}
-	m := &mysql{
-		db:              db,
-		dsn:			 dsn,
+func newMysql(entry *dsnentry, cacheTable string) *mysql {
+	return &mysql{
+		entry:           entry,
 		queryPages:      queryPages,
 		queryCachePages: fmt.Sprintf(queryCachePages, cacheTable),
 	}
-	if err := m.db.Ping(); err != nil {
-		return nil, err
-	}
-	return m, nil
 }
 
 func (m *mysql) count(query string) (int, error) {
 	var cnt int
-	row := m.db.QueryRow(query)
+	row := m.entry.db.QueryRow(query)
 	if err := row.Scan(&cnt); err != nil {
 		return 0, err
 	}
@@ -138,10 +128,6 @@ func (m *mysql) pages() (int, error) {
 
 func (m *mysql) cached() (int, error) {
 	return m.count(m.queryCachePages)
-}
-
-func (m *mysql) close() {
-	m.db.Close()
 }
 
 type results struct {
@@ -200,7 +186,13 @@ func (r *results) taskMysqlCachedPages(d time.Duration, db *mysql) *task {
 	})
 }
 
-type dsnmap map[string]*mysql
+type dsnentry struct {
+	dsn string
+	db  *sql.DB
+	err error
+}
+
+type dsnmap map[string]*dsnentry
 
 func (m dsnmap) String() string {
 	if len(m) == 0 {
@@ -215,49 +207,136 @@ func (m dsnmap) Set(v string) error {
 	if _, ok := m[parts[0]]; ok {
 		return fmt.Errorf("duplicated mysql DSN %s", parts[0])
 	}
-	// TODO: Cache table cannot be set here!
-	db, err := newMysql(parts[1], "cf_cache_pages_tags")
-	if err != nil {
-		return fmt.Errorf("cannot init mysql connection %s: %s", parts[0], err)
+	m[parts[0]] = &dsnentry{dsn: parts[1]}
+	return nil
+}
+
+func (m dsnmap) connect(name string) error {
+	entry, ok := m[name]
+	if !ok {
+		return fmt.Errorf("database connection named %s has not been set with -mysql", name)
 	}
-	m[parts[0]] = db
+	// Already tried, but there was an error.
+	if entry.err != nil {
+		return entry.err
+	}
+	// Already connected successfully.
+	if entry.db != nil {
+		return nil
+	}
+	entry.db, entry.err = connectMysql(entry.dsn)
+	return entry.err
+}
+
+func connectMysql(dsn string) (*sql.DB, error) {
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Ping(); err != nil {
+		return nil, err
+	}
+	return db, nil
+}
+
+type checks map[string]map[string]string // check name : [options]
+
+func parseChecks(s string) (checks, error) {
+	parts := strings.Split(s, ",")
+	cs := checks(make(map[string]map[string]string))
+	var (
+		name string
+		opts map[string]string
+	)
+	for i := range parts {
+		if name == "" {
+			name = parts[i]
+			// TODO: check that the check is not already in the map
+			continue
+		}
+		if !strings.ContainsRune(parts[i], '=') {
+			cs[name] = opts
+			name = parts[i]
+			opts = nil
+			continue
+		}
+		if opts == nil {
+			opts = make(map[string]string)
+		}
+		optparts := strings.SplitN(parts[i], "=", 2)
+		// TODO: check that this option is not already in the map
+		opts[optparts[0]] = optparts[1]
+	}
+	if name != "" && opts != nil {
+		// TODO: check that the check is not already in the map
+		cs[name] = opts
+	}
+	return cs, nil
+}
+
+type products map[string]checks
+
+func (p products) parse(s string) error {
+	parts := strings.SplitN(s, ":", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("error: %s should be in format PRODUCT.STAGE:CHECK,ARGS...,CHECK,ARGS...", s)
+	}
+	if _, ok := p[parts[0]]; ok {
+		return fmt.Errorf("error: system %s specified more than once", parts[0])
+	}
+	cs, err := parseChecks(parts[1])
+	if err != nil {
+		return fmt.Errorf("error for system %s: %s", parts[0], err)
+	}
+	p[parts[0]] = cs
 	return nil
 }
 
 // TODO: Parse: sens3 -mysql portal='DSN' portal.dev:pages,every=10m,db=portal,cached,every=15m,db=portal,proc,every=5m,match=httpd ...
 
 func main() {
-	dsnmap := dsnmap(make(map[string]*mysql))
+	dsnmap := dsnmap(make(map[string]*dsnentry))
 	flag.Var(dsnmap, "mysql", "Named DSN to connect to database")
-	// TODO: this becomes per test
-	//cacheTable := flag.String("mysql-cached-table", "cf_cache_pages_tags", "Name of Caching Framework cache_pages_tags table")
 	//nworkers := flag.Int("workers", 1, "Number of parallel task runners")
 	flag.Parse()
 
-	log.Printf("%+v\n", dsnmap)
-	/*
 	hostname, err := os.Hostname()
 	if err != nil {
 		log.Fatalf("error: %s", err)
 	}
-	// TODO: table names should be given in tasks, not here.
-	db, err := newMysql(*dsn, *cacheTable)
-	if err != nil {
-		log.Fatalf("error: %s", err)
+
+	prods := products(make(map[string]checks))
+	args := flag.Args()
+	for _, arg := range args {
+		if err := prods.parse(arg); err != nil {
+			log.Fatal(err)
+		}
 	}
-	point := &point{hostname, *product, *stage}
-	results := newResults(point)
-
-	// TODO: make this dynamic based on args
 	ts := make([]*task, 0)
-	// TODO: Interval times should be from arguments
-	ts = append(ts, results.taskProc(10*time.Minute, "/proc", "httpd"))
-	ts = append(ts, results.taskMysqlPages(25*time.Minute, db))
-	ts = append(ts, results.taskMysqlCachedPages(30*time.Minute, db))
-	// TODO: write test to count HTTP requests from logs?
+	for name, checks := range prods {
+		parts := strings.SplitN(name, ".", 2)
+		if len(parts) != 2 {
+			log.Fatalf("error: %s should be in format SYSTEM.STAGE", name)
+		}
+		point := &point{hostname, parts[0], parts[1]}
+		results := newResults(point)
+		for cname, opts := range checks {
+			// TODO: check that check type (cname) exists
+			// TODO: parse "every" argument commont to all tasks
+			// TODO: db arg calls connect() on dsnentry
+			// TODO: create task and append to ts
+			ts = append(ts, results.taskBlah(every, arg, arg))
+		}
+	}
 
-	sched := newScheduler(ts, *nworkers)
-	go sched.schedule()
-	results.collect()
+	/*
+		ts = append(ts, results.taskProc(10*time.Minute, "/proc", "httpd"))
+		ts = append(ts, results.taskMysqlPages(25*time.Minute, db))
+		ts = append(ts, results.taskMysqlCachedPages(30*time.Minute, db))
+		// TODO: write test to count HTTP requests from logs?
+
+		sched := newScheduler(ts, *nworkers)
+		go sched.schedule()
+		results.collect()
 	*/
 }
