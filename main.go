@@ -224,6 +224,26 @@ func (r *results) taskMysqlCachedPages(d time.Duration, p *point, opts map[strin
 	}), nil
 }
 
+func (r *results) taskCountNewlines(d time.Duration, p *point, opts map[string]string) (*task, error) {
+	name := "requests"
+	fname, ok := opts["file"]
+	if !ok {
+		return nil, fmt.Errorf("required option 'file'")
+	}
+	rlog, err := newRlog(fname)
+	if err != nil {
+		return nil, fmt.Errorf("cannot init log file reader: %s", err)
+	}
+	return newTask(name, d, p, func(p *point) error {
+		n, err := rlog.count()
+		if err != nil {
+			return err
+		}
+		r.ch <- newResult(name, fmt.Sprintf("%d", n), p)
+		return nil
+	}), nil
+}
+
 type dsnentry struct {
 	dsn string
 	db  *sql.DB
@@ -369,6 +389,7 @@ func initProducts(prods products, res *results) ([]*task, error) {
 		"proc":   res.taskProc,
 		"pages":  res.taskMysqlPages,
 		"cached": res.taskMysqlCachedPages,
+		"reqs":   res.taskCountNewlines,
 	}
 	for name, checks := range prods {
 		parts := strings.SplitN(name, ".", 2)
