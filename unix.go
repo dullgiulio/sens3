@@ -56,3 +56,21 @@ func (p proc) match(substr string) (int, error) {
 	}
 	return matching, nil
 }
+
+type loadavg float64
+
+func (l loadavg) last() (int, error) {
+	f, err := os.Open("/proc/loadavg")
+	if err != nil {
+		return 0, fmt.Errorf("cannot open loadavg proc file: %s", err)
+	}
+	var (
+		load0, load1, load2 float64
+		procs, total, last  int
+	)
+	_, err = fmt.Fscanf(f, "%f %f %f %d/%d %d", &load0, &load1, &load2, &procs, &total, &last)
+	if err != nil {
+		return 0, fmt.Errorf("cannot parse loadavg proc file: %s", err)
+	}
+	return int(load0 / float64(l) * 1000), nil
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"time"
 )
 
@@ -19,6 +20,18 @@ func taskProc(d time.Duration, p *point, opts map[string]string) (*task, error) 
 	return newTask(name, d, p, func() (string, error) {
 		proc := proc(dir)
 		n, err := proc.match(match)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d", n), nil
+	}), nil
+}
+
+func taskLoadavg(d time.Duration, p *point, opts map[string]string) (*task, error) {
+	name := "loadavg"
+	lavg := loadavg(runtime.NumCPU())
+	return newTask(name, d, p, func() (string, error) {
+		n, err := lavg.last()
 		if err != nil {
 			return "", err
 		}
@@ -110,6 +123,7 @@ func makeTasks(dsn dsnmap) tasks {
 		"pages":  dsn.taskMysqlPages,
 		"cached": dsn.taskMysqlCachedPages,
 		"reqs":   taskCountNewlines,
+		"load":   taskLoadavg,
 	}
 }
 
