@@ -73,6 +73,7 @@ func (r *rlog) countLines(fname string, offset int64) (int, int64, error) {
 	if err != nil {
 		return 0, 0, fmt.Errorf("cannot open logfile for reading: %s", err)
 	}
+	defer fh.Close()
 	if r.pos > 0 {
 		pos, err := fh.Seek(offset, 0)
 		if err != nil {
