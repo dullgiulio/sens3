@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-type taskFn func(p *point) error
+type taskFn func() (string, error)
 
 type task struct {
 	name   string
@@ -36,7 +36,7 @@ type scheduler struct {
 	ch chan *task
 }
 
-func newScheduler(ts []*task, nworkers int) *scheduler {
+func newScheduler(ch chan<- *result, ts []*task, nworkers int) *scheduler {
 	s := &scheduler{
 		ts: ts,
 		ch: make(chan *task, 0),
@@ -45,16 +45,19 @@ func newScheduler(ts []*task, nworkers int) *scheduler {
 		return s
 	}
 	for i := 0; i < nworkers; i++ {
-		go s.work()
+		go s.work(ch)
 	}
 	return s
 }
 
-func (s *scheduler) work() {
+func (s *scheduler) work(ch chan<- *result) {
 	for task := range s.ch {
-		if err := task.fn(task.point); err != nil {
+		val, err := task.fn()
+		if err != nil {
 			log.Printf("error: %s: %s", task.name, err)
+			continue
 		}
+		ch <- newResult(task.name, val, task.point)
 	}
 }
 
