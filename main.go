@@ -5,8 +5,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,22 +94,103 @@ func (p proc) match(substr string) (int, error) {
 	return matching, nil
 }
 
-type results struct {
-	dbs dsnmap
-	ch  chan *result
+type collector interface {
+	collect(<-chan *result)
 }
 
-func newResults(dbs dsnmap) *results {
-	return &results{
-		dbs: dbs,
-		ch:  make(chan *result),
+type batchCollector struct {
+	endpoint string
+	nbatch   int
+	batchi   int // current position in batch slice
+	tbatch   time.Duration
+	batch    []*result
+}
+
+func newBatchCollector(endp string, nbatch int, tbatch time.Duration) *batchCollector {
+	return &batchCollector{
+		endpoint: endp,
+		nbatch:   nbatch,
+		tbatch:   tbatch,
+		batch:    make([]*result, nbatch),
 	}
 }
 
+func (b *batchCollector) collect(ch <-chan *result) {
+	var skipTick bool // avoid flushing because of full and then timeout
+	tick := time.Tick(b.tbatch)
+	for {
+		select {
+		case res := <-ch:
+			if b.batchi >= b.nbatch {
+				b.flush()
+				skipTick = true
+			}
+			b.batch[b.batchi] = res
+			b.batchi++
+		case <-tick:
+			if skipTick {
+				skipTick = false
+				continue
+			}
+			b.flush()
+		}
+	}
+}
+
+func (b *batchCollector) flush() {
+	var buf bytes.Buffer
+	for i := 0; i < b.batchi; i++ {
+		fmt.Fprintln(&buf, b.batch[i].String())
+		b.batch[i] = nil
+	}
+	b.batchi = 0
+	resp, err := http.Post(b.endpoint, "text/plain", &buf)
+	if err != nil {
+		log.Printf("influxdb: error posting data: %s", err)
+		return
+	}
+	if resp.StatusCode != 204 {
+		log.Printf("influxdb: error posting data: expected status 204, got %s", resp.Status)
+	}
+	io.Copy(ioutil.Discard, resp.Body)
+	resp.Body.Close()
+}
+
+type printCollector struct {
+	w io.Writer
+}
+
+func (p printCollector) collect(ch <-chan *result) {
+	for r := range ch {
+		fmt.Fprintln(p.w, r.String())
+	}
+}
+
+type results struct {
+	dbs   dsnmap
+	sinks []chan *result
+	ch    chan *result
+}
+
+func newResults(dbs dsnmap, cols []collector) *results {
+	r := &results{
+		dbs:   dbs, // TODO: not a great place for this
+		sinks: make([]chan *result, len(cols)),
+		ch:    make(chan *result),
+	}
+	for i := range cols {
+		ch := make(chan *result)
+		r.sinks[i] = ch
+		go cols[i].collect(ch)
+	}
+	return r
+}
+
 func (r *results) collect() {
-	for r := range r.ch {
-		// TODO: collect many (?) and submit to influxdb
-		fmt.Println(r.String())
+	for res := range r.ch {
+		for i := range r.sinks {
+			r.sinks[i] <- res
+		}
 	}
 }
 
@@ -325,6 +408,10 @@ func main() {
 	dsnmap := dsnmap(make(map[string]*dsnentry))
 	flag.Var(dsnmap, "mysql", "Named DSN to connect to database")
 	nworkers := flag.Int("workers", 1, "Number of parallel task runners")
+	influxdb := flag.String("influxdb", "http://localhost:8086/write?db=mydb", "Address of InfluxDB write endpoint")
+	verbose := flag.Bool("verbose", false, "Print measurements to stdout")
+	nbatch := flag.Int("influx-nbatch", 20, "Max number of measurements to cache")
+	tbatch := 10 * time.Second // TODO: make flag influx-time
 	flag.Parse()
 
 	prods := products(make(map[string]checks))
@@ -334,7 +421,16 @@ func main() {
 			log.Fatal(err)
 		}
 	}
-	results := newResults(dsnmap)
+
+	var collectors []collector
+	if *influxdb != "" {
+		collectors = append(collectors, newBatchCollector(*influxdb, *nbatch, tbatch))
+	}
+	if *verbose {
+		collectors = append(collectors, printCollector{os.Stdout})
+	}
+
+	results := newResults(dsnmap, collectors)
 	ts, err := initProducts(prods, results)
 	if err != nil {
 		log.Fatalf("error: %s", err)
