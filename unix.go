@@ -64,6 +64,7 @@ func (l loadavg) last() (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("cannot open loadavg proc file: %s", err)
 	}
+	defer f.Close()
 	var (
 		load0, load1, load2 float64
 		procs, total, last  int
