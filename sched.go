@@ -65,6 +65,9 @@ func (s *scheduler) schedule() {
 	for {
 		sort.Sort(taskByTimeLeft(s.ts))
 		wait := s.ts[0].left
+		if wait > 0 {
+			time.Sleep(wait)
+		}
 		for i := range s.ts {
 			s.ts[i].left -= wait
 			if s.ts[i].left <= 0 {
@@ -72,6 +75,5 @@ func (s *scheduler) schedule() {
 				s.ch <- s.ts[i]
 			}
 		}
-		time.Sleep(wait)
 	}
 }
