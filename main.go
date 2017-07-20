@@ -7,14 +7,19 @@ import (
 	"time"
 )
 
+const (
+	defaultInfluxURL = "http://HOST:8086/write?db=MY_DB"
+)
+
 func main() {
 	dsnmap := dsnmap(make(map[string]*dsnentry))
 	flag.Var(dsnmap, "mysql", "Named DSN to connect to database")
 	nworkers := flag.Int("workers", 1, "Number of parallel task runners")
-	influxdb := flag.String("influxdb", "http://localhost:8086/write?db=mydb", "Address of InfluxDB write endpoint")
 	verbose := flag.Bool("verbose", false, "Print measurements to stdout")
+	influxdb := flag.String("influxdb", defaultInfluxURL, "Address of InfluxDB write endpoint")
 	nbatch := flag.Int("influx-nbatch", 20, "Max number of measurements to cache")
-	tbatch := 10 * time.Second // TODO: make flag influx-time
+	tbatch := flag.Duration("influx-batch-time", 10*time.Second, "Max duration betweek flushes of InfluxDB cache")
+	every := flag.Duration("default-every", 10*time.Second, "Default repetition duration for tasks that don't specify the 'every' flag")
 	flag.Parse()
 
 	hostname, err := os.Hostname()
@@ -31,15 +36,15 @@ func main() {
 	}
 
 	var collectors []collector
-	if *influxdb != "" {
-		collectors = append(collectors, newBatchCollector(*influxdb, *nbatch, tbatch))
+	if *influxdb != "" && *influxdb != defaultInfluxURL {
+		collectors = append(collectors, newBatchCollector(*influxdb, *nbatch, *tbatch))
 	}
 	if *verbose {
 		collectors = append(collectors, printCollector{os.Stdout})
 	}
 
 	results := newResults(collectors)
-	ts, err := initProducts(hostname, prods, dsnmap)
+	ts, err := initProducts(hostname, *every, prods, dsnmap)
 	if err != nil {
 		log.Fatalf("error: %s", err)
 	}

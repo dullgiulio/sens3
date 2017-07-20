@@ -7,8 +7,7 @@ import (
 	"time"
 )
 
-func taskProc(d time.Duration, p *point, opts map[string]string) (*task, error) {
-	name := "http_processes"
+func taskProc(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
 	dir, ok := opts["dir"]
 	if !ok {
 		dir = "/proc"
@@ -27,8 +26,7 @@ func taskProc(d time.Duration, p *point, opts map[string]string) (*task, error) 
 	}), nil
 }
 
-func taskLoadavg(d time.Duration, p *point, opts map[string]string) (*task, error) {
-	name := "loadavg"
+func taskLoadavg(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
 	lavg := loadavg(runtime.NumCPU())
 	return newTask(name, d, p, func() (string, error) {
 		n, err := lavg.last()
@@ -39,8 +37,7 @@ func taskLoadavg(d time.Duration, p *point, opts map[string]string) (*task, erro
 	}), nil
 }
 
-func (m dsnmap) taskMysqlPages(d time.Duration, p *point, opts map[string]string) (*task, error) {
-	name := "mysql_pages"
+func (m dsnmap) taskMysqlPages(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
 	dbname, ok := opts["db"]
 	if !ok {
 		return nil, fmt.Errorf("required option 'db'")
@@ -63,8 +60,7 @@ func (m dsnmap) taskMysqlPages(d time.Duration, p *point, opts map[string]string
 	}), nil
 }
 
-func (m dsnmap) taskMysqlCachedPages(d time.Duration, p *point, opts map[string]string) (*task, error) {
-	name := "mysql_cached_pages"
+func (m dsnmap) taskMysqlCachedPages(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
 	dbname, ok := opts["db"]
 	if !ok {
 		return nil, fmt.Errorf("required option 'db'")
@@ -90,15 +86,14 @@ func (m dsnmap) taskMysqlCachedPages(d time.Duration, p *point, opts map[string]
 	}), nil
 }
 
-func taskCountNewlines(d time.Duration, p *point, opts map[string]string) (*task, error) {
-	name := "requests"
+func taskCountNewlines(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
 	dir, ok := opts["dir"]
 	if !ok {
 		return nil, fmt.Errorf("required option 'dir'")
 	}
 	match, ok := opts["match"]
 	if !ok {
-		return nil, fmt.Errorf("required option 'match'")
+		match = "access_log"
 	}
 	rlog, err := newRlog(dir, match)
 	if err != nil {
@@ -113,7 +108,7 @@ func taskCountNewlines(d time.Duration, p *point, opts map[string]string) (*task
 	}), nil
 }
 
-type taskMaker func(every time.Duration, point *point, opts map[string]string) (*task, error)
+type taskMaker func(name string, every time.Duration, point *point, opts map[string]string) (*task, error)
 
 type tasks map[string]taskMaker
 
@@ -127,20 +122,24 @@ func makeTasks(dsn dsnmap) tasks {
 	}
 }
 
-func (ts tasks) setup(task string, p *point, opts map[string]string) (*task, error) {
+func (ts tasks) setup(task string, every time.Duration, p *point, opts map[string]string) (*task, error) {
 	fn, ok := ts[task]
 	if !ok {
 		return nil, errors.New("not a valid task")
 	}
+	var err error
 	val, ok := opts["every"]
+	if ok {
+		every, err = time.ParseDuration(val)
+		if err != nil {
+			return nil, fmt.Errorf("option 'every' is invalid: %s", err)
+		}
+	}
+	name, ok := opts["name"]
 	if !ok {
-		return nil, errors.New("options 'every' is required")
+		name = task
 	}
-	every, err := time.ParseDuration(val)
-	if err != nil {
-		return nil, fmt.Errorf("option 'every' is invalid: %s", err)
-	}
-	t, err := fn(every, p, opts)
+	t, err := fn(name, every, p, opts)
 	if err != nil {
 		return nil, err
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 type checks map[string]map[string]string // check name : [options]
@@ -48,7 +49,7 @@ func parseChecks(s string) (checks, error) {
 
 type products map[string]checks
 
-func initProducts(hostname string, prods products, dsn dsnmap) ([]*task, error) {
+func initProducts(hostname string, every time.Duration, prods products, dsn dsnmap) ([]*task, error) {
 	ts := make([]*task, 0)
 	tsmap := makeTasks(dsn)
 	for name, checks := range prods {
@@ -58,7 +59,7 @@ func initProducts(hostname string, prods products, dsn dsnmap) ([]*task, error) 
 		}
 		point := &point{hostname, parts[0], parts[1]}
 		for cname, opts := range checks {
-			t, err := tsmap.setup(cname, point, opts)
+			t, err := tsmap.setup(cname, every, point, opts)
 			if err != nil {
 				return nil, fmt.Errorf("%s: task %s: %s", name, cname, err)
 			}
