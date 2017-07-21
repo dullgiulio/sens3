@@ -7,6 +7,8 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
+	"os"
 	"time"
 )
 
@@ -22,12 +24,12 @@ func (p *point) String() string {
 
 type result struct {
 	time  time.Time
+	value int
 	name  string
-	value string
 	point string
 }
 
-func newResult(name, value string, point *point) *result {
+func newResult(name string, value int, point *point) *result {
 	return &result{
 		time:  time.Now(),
 		name:  name,
@@ -37,7 +39,7 @@ func newResult(name, value string, point *point) *result {
 }
 
 func (r *result) String() string {
-	return fmt.Sprintf("%s,%s value=%s %d",
+	return fmt.Sprintf("%s,%s value=%d %d",
 		r.name, r.point, r.value, r.time.UnixNano())
 }
 
@@ -51,13 +53,15 @@ type batchCollector struct {
 	batchi   int // current position in batch slice
 	tbatch   time.Duration
 	batch    []*result
+	client   *http.Client
 }
 
-func newBatchCollector(endp string, nbatch int, tbatch time.Duration) *batchCollector {
+func newBatchCollector(endp string, nbatch int, tbatch time.Duration, client *http.Client) *batchCollector {
 	return &batchCollector{
 		endpoint: endp,
 		nbatch:   nbatch,
 		tbatch:   tbatch,
+		client:   client,
 		batch:    make([]*result, nbatch),
 	}
 }
@@ -91,7 +95,7 @@ func (b *batchCollector) flush() {
 		b.batch[i] = nil
 	}
 	b.batchi = 0
-	resp, err := http.Post(b.endpoint, "text/plain", &buf)
+	resp, err := b.client.Post(b.endpoint, "text/plain", &buf)
 	if err != nil {
 		log.Printf("influxdb: error posting data: %s", err)
 		return
@@ -101,6 +105,22 @@ func (b *batchCollector) flush() {
 	}
 	io.Copy(ioutil.Discard, resp.Body)
 	resp.Body.Close()
+}
+
+func ProxyAwareHttpClient() (*http.Client, error) {
+	proxyurl, ok := os.LookupEnv("HTTP_PROXY")
+	if !ok {
+		return http.DefaultClient, nil
+	}
+	purl, err := url.Parse(proxyurl)
+	if err != nil {
+		return nil, fmt.Errorf("invalid URL in environment variable HTTP_PROXY: %s", err)
+	}
+	fmt.Printf("%#v\n", purl)
+	tr := &http.Transport{
+		Proxy: http.ProxyURL(purl),
+	}
+	return &http.Client{Transport: tr}, nil
 }
 
 type printCollector struct {

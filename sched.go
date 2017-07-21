@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-type taskFn func() (string, error)
+type taskFn func() (int, error)
 
 type task struct {
 	name   string

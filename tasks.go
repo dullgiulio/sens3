@@ -16,24 +16,24 @@ func taskProc(name string, d time.Duration, p *point, opts map[string]string) (*
 	if !ok {
 		match = "httpd"
 	}
-	return newTask(name, d, p, func() (string, error) {
+	return newTask(name, d, p, func() (int, error) {
 		proc := proc(dir)
 		n, err := proc.match(match)
 		if err != nil {
-			return "", err
+			return 0, err
 		}
-		return fmt.Sprintf("%d", n), nil
+		return n, nil
 	}), nil
 }
 
 func taskLoadavg(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
 	lavg := loadavg(runtime.NumCPU())
-	return newTask(name, d, p, func() (string, error) {
+	return newTask(name, d, p, func() (int, error) {
 		n, err := lavg.last()
 		if err != nil {
-			return "", err
+			return 0, err
 		}
-		return fmt.Sprintf("%d", n), nil
+		return n, nil
 	}), nil
 }
 
@@ -51,12 +51,12 @@ func (m dsnmap) taskMysqlPages(name string, d time.Duration, p *point, opts map[
 	}
 	// TODO: this is ugly that an unneeded arg is defaulted
 	db := newMysql(dbent, "")
-	return newTask(name, d, p, func() (string, error) {
+	return newTask(name, d, p, func() (int, error) {
 		n, err := db.pages()
 		if err != nil {
-			return "", err
+			return 0, err
 		}
-		return fmt.Sprintf("%d", n), nil
+		return n, nil
 	}), nil
 }
 
@@ -77,12 +77,12 @@ func (m dsnmap) taskMysqlCachedPages(name string, d time.Duration, p *point, opt
 		table = "cf_cache_pages_tags"
 	}
 	db := newMysql(dbent, table)
-	return newTask(name, d, p, func() (string, error) {
+	return newTask(name, d, p, func() (int, error) {
 		n, err := db.cached()
 		if err != nil {
-			return "", err
+			return 0, err
 		}
-		return fmt.Sprintf("%d", n), nil
+		return n, nil
 	}), nil
 }
 
@@ -99,12 +99,12 @@ func taskCountNewlines(name string, d time.Duration, p *point, opts map[string]s
 	if err != nil {
 		return nil, fmt.Errorf("cannot init log file reader: %s", err)
 	}
-	return newTask(name, d, p, func() (string, error) {
+	return newTask(name, d, p, func() (int, error) {
 		n, err := rlog.count()
 		if err != nil {
-			return "", err
+			return 0, err
 		}
-		return fmt.Sprintf("%d", n), nil
+		return n, nil
 	}), nil
 }
 

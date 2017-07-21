@@ -37,7 +37,11 @@ func main() {
 
 	var collectors []collector
 	if *influxdb != "" && *influxdb != defaultInfluxURL {
-		collectors = append(collectors, newBatchCollector(*influxdb, *nbatch, *tbatch))
+		client, err := ProxyAwareHttpClient()
+		if err != nil {
+			log.Fatalf("fatal: %s", err)
+		}
+		collectors = append(collectors, newBatchCollector(*influxdb, *nbatch, *tbatch, client))
 	}
 	if *verbose {
 		collectors = append(collectors, printCollector{os.Stdout})
