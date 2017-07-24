@@ -37,7 +37,7 @@ func taskLoadavg(name string, d time.Duration, p *point, opts map[string]string)
 	}), nil
 }
 
-func (m dsnmap) taskMysqlPages(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
+func (m dsnmap) mysqlInit(opts map[string]string) (*dsnentry, error) {
 	dbname, ok := opts["db"]
 	if !ok {
 		return nil, fmt.Errorf("required option 'db'")
@@ -47,6 +47,14 @@ func (m dsnmap) taskMysqlPages(name string, d time.Duration, p *point, opts map[
 		return nil, fmt.Errorf("database connection %s not defined; define it using -mysql", dbname)
 	}
 	if err := dbent.connect(); err != nil {
+		return nil, err
+	}
+	return dbent, nil
+}
+
+func (m dsnmap) taskMysqlPages(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
+	dbent, err := m.mysqlInit(opts)
+	if err != nil {
 		return nil, err
 	}
 	// TODO: this is ugly that an unneeded arg is defaulted
@@ -61,15 +69,8 @@ func (m dsnmap) taskMysqlPages(name string, d time.Duration, p *point, opts map[
 }
 
 func (m dsnmap) taskMysqlCachedPages(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
-	dbname, ok := opts["db"]
-	if !ok {
-		return nil, fmt.Errorf("required option 'db'")
-	}
-	dbent, ok := m[dbname]
-	if !ok {
-		return nil, fmt.Errorf("database connection %s not defined; define it using -mysql", dbname)
-	}
-	if err := dbent.connect(); err != nil {
+	dbent, err := m.mysqlInit(opts)
+	if err != nil {
 		return nil, err
 	}
 	table, ok := opts["table"]
@@ -81,6 +82,21 @@ func (m dsnmap) taskMysqlCachedPages(name string, d time.Duration, p *point, opt
 		n, err := db.cached()
 		if err != nil {
 			return 0, err
+		}
+		return n, nil
+	}), nil
+}
+
+func (m dsnmap) taskMysqlConn(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
+	dbent, err := m.mysqlInit(opts)
+	if err != nil {
+		return nil, err
+	}
+	db := newMysql(dbent, "")
+	return newTask(name, d, p, func() (int, error) {
+		n, err := db.conn()
+		if err != nil {
+			return 0, nil
 		}
 		return n, nil
 	}), nil
@@ -117,6 +133,7 @@ func makeTasks(dsn dsnmap) tasks {
 		"proc":   taskProc,
 		"pages":  dsn.taskMysqlPages,
 		"cached": dsn.taskMysqlCachedPages,
+		"dbconn": dsn.taskMysqlConn,
 		"logcat": taskCountNewlines,
 		"load":   taskLoadavg,
 	}

@@ -9,6 +9,7 @@ import (
 )
 
 const (
+	queryStatus     = "SHOW STATUS WHERE `variable_name` = '%s'"
 	queryPages      = "SELECT COUNT(*) FROM pages WHERE deleted=0 AND hidden=0 AND doktype=1"
 	queryCachePages = "SELECT COUNT( DISTINCT tag ) FROM %s"
 )
@@ -16,6 +17,7 @@ const (
 type mysql struct {
 	entry           *dsnentry
 	queryPages      string
+	queryStatusConn string
 	queryCachePages string
 }
 
@@ -23,8 +25,25 @@ func newMysql(entry *dsnentry, cacheTable string) *mysql {
 	return &mysql{
 		entry:           entry,
 		queryPages:      queryPages,
+		queryStatusConn: fmt.Sprintf(queryStatus, "Threads_connected"),
 		queryCachePages: fmt.Sprintf(queryCachePages, cacheTable),
 	}
+}
+
+func (m *mysql) statusVar(query string) (int, error) {
+	var (
+		key string
+		cnt int
+	)
+	row := m.entry.db.QueryRow(query)
+	if err := row.Scan(&key, &cnt); err != nil {
+		return 0, err
+	}
+	return cnt, nil
+}
+
+func (m *mysql) conn() (int, error) {
+	return m.statusVar(m.queryStatusConn)
 }
 
 func (m *mysql) count(query string) (int, error) {

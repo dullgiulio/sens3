@@ -43,7 +43,6 @@ func parseChecks(s string) (checks, error) {
 		opts[""] = name
 		cs = append(cs, opts)
 	}
-	fmt.Printf("%#v\n", cs)
 	return cs, nil
 }
 
