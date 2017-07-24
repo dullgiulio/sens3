@@ -6,11 +6,11 @@ import (
 	"time"
 )
 
-type checks map[string]map[string]string // check name : [options]
+type checks []map[string]string
 
 func parseChecks(s string) (checks, error) {
 	parts := strings.Split(s, ",")
-	cs := checks(make(map[string]map[string]string))
+	cs := checks(make([]map[string]string, 0))
 	var (
 		name string
 		opts map[string]string
@@ -18,13 +18,11 @@ func parseChecks(s string) (checks, error) {
 	for i := range parts {
 		if name == "" {
 			name = parts[i]
-			if _, ok := cs[name]; ok {
-				return nil, fmt.Errorf("check %s repeated", name)
-			}
 			continue
 		}
 		if !strings.ContainsRune(parts[i], '=') {
-			cs[name] = opts
+			opts[""] = name
+			cs = append(cs, opts)
 			name = parts[i]
 			opts = nil
 			continue
@@ -33,17 +31,19 @@ func parseChecks(s string) (checks, error) {
 			opts = make(map[string]string)
 		}
 		optparts := strings.SplitN(parts[i], "=", 2)
+		if optparts[0] == "" {
+			return nil, fmt.Errorf("check %s: invalid option without key", name)
+		}
 		if _, ok := opts[optparts[0]]; ok {
 			return nil, fmt.Errorf("check %s: option %s repeated", name, optparts[0])
 		}
 		opts[optparts[0]] = optparts[1]
 	}
 	if name != "" {
-		if _, ok := cs[name]; ok {
-			return nil, fmt.Errorf("check %s repeated", name)
-		}
-		cs[name] = opts
+		opts[""] = name
+		cs = append(cs, opts)
 	}
+	fmt.Printf("%#v\n", cs)
 	return cs, nil
 }
 
@@ -58,7 +58,8 @@ func initProducts(hostname string, every time.Duration, prods products, dsn dsnm
 			return nil, fmt.Errorf("%s should be in format SYSTEM.STAGE", name)
 		}
 		point := &point{hostname, parts[0], parts[1]}
-		for cname, opts := range checks {
+		for _, opts := range checks {
+			cname := opts[""]
 			t, err := tsmap.setup(cname, every, point, opts)
 			if err != nil {
 				return nil, fmt.Errorf("%s: task %s: %s", name, cname, err)

@@ -117,7 +117,7 @@ func makeTasks(dsn dsnmap) tasks {
 		"proc":   taskProc,
 		"pages":  dsn.taskMysqlPages,
 		"cached": dsn.taskMysqlCachedPages,
-		"reqs":   taskCountNewlines,
+		"logcat": taskCountNewlines,
 		"load":   taskLoadavg,
 	}
 }
