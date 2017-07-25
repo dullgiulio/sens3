@@ -16,6 +16,9 @@ func parseChecks(s string) (checks, error) {
 		opts map[string]string
 	)
 	for i := range parts {
+		if opts == nil {
+			opts = make(map[string]string)
+		}
 		if name == "" {
 			name = parts[i]
 			continue
@@ -26,9 +29,6 @@ func parseChecks(s string) (checks, error) {
 			name = parts[i]
 			opts = nil
 			continue
-		}
-		if opts == nil {
-			opts = make(map[string]string)
 		}
 		optparts := strings.SplitN(parts[i], "=", 2)
 		if optparts[0] == "" {
