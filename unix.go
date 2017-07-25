@@ -46,10 +46,8 @@ func (p proc) match(substr string) (int, error) {
 		if name[0] < '0' || name[0] > '9' {
 			continue
 		}
-		arg0, err := p.cmdName(fis[i])
-		if err != nil {
-			return 0, err
-		}
+		// ignore errors here; usually permissions or race in directory/file open
+		arg0, _ := p.cmdName(fis[i])
 		if strings.Contains(arg0, substr) {
 			matching++
 		}
