@@ -71,6 +71,29 @@ func (m dsnmap) taskMysqlPages(name string, d time.Duration, p *point, opts map[
 	}), nil
 }
 
+func (m dsnmap) taskMysqlSyslog(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
+	dbent, err := m.mysqlInit(opts)
+	if err != nil {
+		return nil, err
+	}
+	// TODO: this is ugly that an unneeded arg is defaulted
+	db := newMysql(dbent, "")
+	return newTask(name, d, p, func(ch chan<- *result, t *task) error {
+		s, err := db.syslog()
+		if err != nil {
+			return err
+		}
+		ch <- newResult(t.name, s.db, t.point, "type=db")
+		ch <- newResult(t.name, s.file, t.point, "type=file")
+		ch <- newResult(t.name, s.cache, t.point, "type=cache")
+		ch <- newResult(t.name, s.ext, t.point, "type=ext")
+		ch <- newResult(t.name, s.err, t.point, "type=err")
+		ch <- newResult(t.name, s.setting, t.point, "type=settings")
+		ch <- newResult(t.name, s.login, t.point, "type=login")
+		return nil
+	}), nil
+}
+
 func (m dsnmap) taskMysqlCachedPages(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
 	dbent, err := m.mysqlInit(opts)
 	if err != nil {
@@ -140,6 +163,7 @@ func makeTasks(dsn dsnmap) tasks {
 		"pages":  dsn.taskMysqlPages,
 		"cached": dsn.taskMysqlCachedPages,
 		"dbconn": dsn.taskMysqlConn,
+		"syslog": dsn.taskMysqlSyslog,
 		"logcat": taskCountNewlines,
 		"load":   taskLoadavg,
 	}

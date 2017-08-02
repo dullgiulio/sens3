@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -12,6 +13,7 @@ const (
 	queryStatus     = "SHOW STATUS WHERE `variable_name` = '%s'"
 	queryPages      = "SELECT COUNT(*) FROM pages WHERE deleted=0 AND hidden=0 AND doktype=1"
 	queryCachePages = "SELECT COUNT( DISTINCT tag ) FROM %s"
+	querySyslog     = "SELECT type, COUNT(type) FROM sys_log WHERE tstamp > %d GROUP BY type"
 )
 
 type mysql struct {
@@ -19,6 +21,11 @@ type mysql struct {
 	queryPages      string
 	queryStatusConn string
 	queryCachePages string
+	lastSyslog      time.Time
+}
+
+type syslog struct {
+	db, file, cache, ext, err, setting, login int
 }
 
 func newMysql(entry *dsnentry, cacheTable string) *mysql {
@@ -44,6 +51,42 @@ func (m *mysql) statusVar(query string) (int, error) {
 
 func (m *mysql) conn() (int, error) {
 	return m.statusVar(m.queryStatusConn)
+}
+
+func (m *mysql) syslog() (*syslog, error) {
+	if m.lastSyslog.IsZero() {
+		m.lastSyslog = time.Now()
+	}
+	// TODO: Use prepared statements?
+	rows, err := m.entry.db.Query(fmt.Sprintf(querySyslog, m.lastSyslog.Unix()))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var s syslog
+	for rows.Next() {
+		var t, v int
+		if err = rows.Scan(&t, &v); err != nil {
+			return nil, err
+		}
+		switch t {
+		case 1:
+			s.db = v
+		case 2:
+			s.file = v
+		case 3:
+			s.cache = v
+		case 4:
+			s.ext = v
+		case 5:
+			s.err = v
+		case 254:
+			s.setting = v
+		case 255:
+			s.login = v
+		}
+	}
+	return &s, nil
 }
 
 func (m *mysql) count(query string) (int, error) {
