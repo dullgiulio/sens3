@@ -16,24 +16,26 @@ func taskProc(name string, d time.Duration, p *point, opts map[string]string) (*
 	if !ok {
 		match = "httpd"
 	}
-	return newTask(name, d, p, func() (int, error) {
+	return newTask(name, d, p, func(ch chan<- *result, t *task) error {
 		proc := proc(dir)
 		n, err := proc.match(match)
 		if err != nil {
-			return 0, err
+			return err
 		}
-		return n, nil
+		ch <- newResult(t.name, n, t.point, "")
+		return nil
 	}), nil
 }
 
 func taskLoadavg(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
 	lavg := loadavg(runtime.NumCPU())
-	return newTask(name, d, p, func() (int, error) {
+	return newTask(name, d, p, func(ch chan<- *result, t *task) error {
 		n, err := lavg.last()
 		if err != nil {
-			return 0, err
+			return err
 		}
-		return n, nil
+		ch <- newResult(t.name, n, t.point, "")
+		return nil
 	}), nil
 }
 
@@ -59,12 +61,13 @@ func (m dsnmap) taskMysqlPages(name string, d time.Duration, p *point, opts map[
 	}
 	// TODO: this is ugly that an unneeded arg is defaulted
 	db := newMysql(dbent, "")
-	return newTask(name, d, p, func() (int, error) {
+	return newTask(name, d, p, func(ch chan<- *result, t *task) error {
 		n, err := db.pages()
 		if err != nil {
-			return 0, err
+			return err
 		}
-		return n, nil
+		ch <- newResult(t.name, n, t.point, "")
+		return nil
 	}), nil
 }
 
@@ -78,12 +81,13 @@ func (m dsnmap) taskMysqlCachedPages(name string, d time.Duration, p *point, opt
 		table = "cf_cache_pages_tags"
 	}
 	db := newMysql(dbent, table)
-	return newTask(name, d, p, func() (int, error) {
+	return newTask(name, d, p, func(ch chan<- *result, t *task) error {
 		n, err := db.cached()
 		if err != nil {
-			return 0, err
+			return err
 		}
-		return n, nil
+		ch <- newResult(t.name, n, t.point, "")
+		return nil
 	}), nil
 }
 
@@ -93,12 +97,13 @@ func (m dsnmap) taskMysqlConn(name string, d time.Duration, p *point, opts map[s
 		return nil, err
 	}
 	db := newMysql(dbent, "")
-	return newTask(name, d, p, func() (int, error) {
+	return newTask(name, d, p, func(ch chan<- *result, t *task) error {
 		n, err := db.conn()
 		if err != nil {
-			return 0, nil
+			return err
 		}
-		return n, nil
+		ch <- newResult(t.name, n, t.point, "")
+		return nil
 	}), nil
 }
 
@@ -115,12 +120,13 @@ func taskCountNewlines(name string, d time.Duration, p *point, opts map[string]s
 	if err != nil {
 		return nil, fmt.Errorf("cannot init log file reader: %s", err)
 	}
-	return newTask(name, d, p, func() (int, error) {
+	return newTask(name, d, p, func(ch chan<- *result, t *task) error {
 		n, err := rlog.count()
 		if err != nil {
-			return 0, err
+			return err
 		}
-		return n, nil
+		ch <- newResult(t.name, n, t.point, "")
+		return nil
 	}), nil
 }
 

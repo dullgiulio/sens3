@@ -21,20 +21,26 @@ type result struct {
 	value int
 	name  string
 	point string
+	tags  string
 }
 
-func newResult(name string, value int, point *point) *result {
+func newResult(name string, value int, point *point, tags string) *result {
 	return &result{
 		time:  time.Now(),
 		name:  name,
 		value: value,
 		point: point.String(),
+		tags:  tags,
 	}
 }
 
 func (r *result) String() string {
-	return fmt.Sprintf("%s,%s value=%d %d",
-		r.name, r.point, r.value, r.time.UnixNano())
+	if r.tags == "" {
+		return fmt.Sprintf("%s,%s value=%d %d",
+			r.name, r.point, r.value, r.time.UnixNano())
+	}
+	return fmt.Sprintf("%s,%s,%s value=%d %d",
+		r.name, r.point, r.tags, r.value, r.time.UnixNano())
 }
 
 type results struct {
