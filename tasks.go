@@ -78,6 +78,7 @@ func (m dsnmap) taskMysqlSyslog(name string, d time.Duration, p *point, opts map
 	}
 	// TODO: this is ugly that an unneeded arg is defaulted
 	db := newMysql(dbent, "")
+	db.lastSyslog = time.Now().Add(-d)
 	return newTask(name, d, p, func(ch chan<- *result, t *task) error {
 		s, err := db.syslog()
 		if err != nil {
