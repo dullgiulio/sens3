@@ -63,6 +63,7 @@ func (m *mysql) syslog() (*syslog, error) {
 		return nil, err
 	}
 	defer rows.Close()
+	m.lastSyslog = time.Now()
 	var s syslog
 	for rows.Next() {
 		var t, v int
