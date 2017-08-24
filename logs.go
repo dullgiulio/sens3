@@ -2,8 +2,10 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +17,7 @@ type rlog struct {
 	match string
 	fname string
 	pos   int64
+	last  time.Time
 }
 
 func newRlog(dir, match string) (*rlog, error) {
@@ -28,6 +31,7 @@ func newRlog(dir, match string) (*rlog, error) {
 	r := &rlog{
 		dir:   dir,
 		match: match,
+		last:  time.Now(),
 	}
 	latestFile, err := r.lastMod()
 	if err != nil {
@@ -84,10 +88,29 @@ func (r *rlog) countLines(fname string, offset int64) (int, int64, error) {
 	var cnt int
 	s := bufio.NewScanner(fh)
 	for s.Scan() {
-		cnt++
 		bs := s.Bytes()
-		offset += int64(len(bs))
+		offset += int64(len(bs)) + 1
+		begin := bytes.IndexByte(bs, '[')
+		end := bytes.IndexByte(bs[begin:len(bs)], ']')
+		if end < 0 {
+			continue
+		}
+		ts := bs[begin+1 : end+begin]
+		// TODO: format should be configurable in task
+		format := "Mon Jan _2 15:04:05 2006"
+		if len(ts) == 26 {
+			format = "02/Jan/2006:15:04:05 -0700"
+		}
+		t, err := time.Parse(format, string(ts))
+		if err != nil {
+			log.Printf("error: rlog: cannot parse time in logfile %s: %s", fname, err)
+			continue
+		}
+		if t.After(r.last) {
+			cnt++
+		}
 	}
+	r.last = time.Now()
 	if err := s.Err(); err != nil {
 		return 0, 0, fmt.Errorf("cannot scan logfile lines: %s", err)
 	}
