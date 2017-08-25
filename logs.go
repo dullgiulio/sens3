@@ -85,12 +85,18 @@ func (r *rlog) countLines(fname string, offset int64) (int, int64, error) {
 		}
 		r.pos = pos
 	}
-	var cnt int
+	var (
+		cnt int
+		t   time.Time
+	)
 	s := bufio.NewScanner(fh)
 	for s.Scan() {
 		bs := s.Bytes()
 		offset += int64(len(bs)) + 1
 		begin := bytes.IndexByte(bs, '[')
+		if begin < 0 {
+			continue
+		}
 		end := bytes.IndexByte(bs[begin:len(bs)], ']')
 		if end < 0 {
 			continue
@@ -101,7 +107,7 @@ func (r *rlog) countLines(fname string, offset int64) (int, int64, error) {
 		if len(ts) == 26 {
 			format = "02/Jan/2006:15:04:05 -0700"
 		}
-		t, err := time.Parse(format, string(ts))
+		t, err = time.Parse(format, string(ts))
 		if err != nil {
 			log.Printf("error: rlog: cannot parse time in logfile %s: %s", fname, err)
 			continue
@@ -110,7 +116,10 @@ func (r *rlog) countLines(fname string, offset int64) (int, int64, error) {
 			cnt++
 		}
 	}
-	r.last = time.Now()
+	if t.IsZero() {
+		t = time.Now()
+	}
+	r.last = t
 	if err := s.Err(); err != nil {
 		return 0, 0, fmt.Errorf("cannot scan logfile lines: %s", err)
 	}
