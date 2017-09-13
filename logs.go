@@ -58,7 +58,7 @@ func (r *rlog) lastMod() (string, error) {
 	for _, fi := range files {
 		fmod := fi.ModTime()
 		name := fi.Name()
-		if !strings.HasPrefix(name, r.match) {
+		if !strings.HasPrefix(name, r.match) || strings.HasSuffix(name, ".gz") {
 			continue
 		}
 		if !mod.After(fmod) {
