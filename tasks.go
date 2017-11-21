@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func taskProc(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
+func taskProc(name string, d time.Duration, ch chan<- *result, p *point, opts map[string]string) (*task, error) {
 	dir, ok := opts["dir"]
 	if !ok {
 		dir = "/proc"
@@ -16,25 +16,25 @@ func taskProc(name string, d time.Duration, p *point, opts map[string]string) (*
 	if !ok {
 		match = "httpd"
 	}
-	return newTask(name, d, p, func(ch chan<- *result, t *task) error {
+	return newTask(name, d, func(t *task) error {
 		proc := proc(dir)
 		n, err := proc.match(match)
 		if err != nil {
 			return err
 		}
-		ch <- newResult(t.name, n, t.point, "")
+		ch <- newResult(t.name, n, p, "")
 		return nil
 	}), nil
 }
 
-func taskLoadavg(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
+func taskLoadavg(name string, d time.Duration, ch chan<- *result, p *point, opts map[string]string) (*task, error) {
 	lavg := loadavg(runtime.NumCPU())
-	return newTask(name, d, p, func(ch chan<- *result, t *task) error {
+	return newTask(name, d, func(t *task) error {
 		n, err := lavg.last()
 		if err != nil {
 			return err
 		}
-		ch <- newResult(t.name, n, t.point, "")
+		ch <- newResult(t.name, n, p, "")
 		return nil
 	}), nil
 }
@@ -54,24 +54,24 @@ func (m dsnmap) mysqlInit(opts map[string]string) (*dsnentry, error) {
 	return dbent, nil
 }
 
-func (m dsnmap) taskMysqlPages(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
+func (m dsnmap) taskMysqlPages(name string, d time.Duration, ch chan<- *result, p *point, opts map[string]string) (*task, error) {
 	dbent, err := m.mysqlInit(opts)
 	if err != nil {
 		return nil, err
 	}
 	// TODO: this is ugly that an unneeded arg is defaulted
 	db := newMysql(dbent, "")
-	return newTask(name, d, p, func(ch chan<- *result, t *task) error {
+	return newTask(name, d, func(t *task) error {
 		n, err := db.pages()
 		if err != nil {
 			return err
 		}
-		ch <- newResult(t.name, n, t.point, "")
+		ch <- newResult(t.name, n, p, "")
 		return nil
 	}), nil
 }
 
-func (m dsnmap) taskMysqlSyslog(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
+func (m dsnmap) taskMysqlSyslog(name string, d time.Duration, ch chan<- *result, p *point, opts map[string]string) (*task, error) {
 	dbent, err := m.mysqlInit(opts)
 	if err != nil {
 		return nil, err
@@ -79,23 +79,23 @@ func (m dsnmap) taskMysqlSyslog(name string, d time.Duration, p *point, opts map
 	// TODO: this is ugly that an unneeded arg is defaulted
 	db := newMysql(dbent, "")
 	db.lastSyslog = time.Now().Add(-d)
-	return newTask(name, d, p, func(ch chan<- *result, t *task) error {
+	return newTask(name, d, func(t *task) error {
 		s, err := db.syslog()
 		if err != nil {
 			return err
 		}
-		ch <- newResult(t.name, s.db, t.point, "type=db")
-		ch <- newResult(t.name, s.file, t.point, "type=file")
-		ch <- newResult(t.name, s.cache, t.point, "type=cache")
-		ch <- newResult(t.name, s.ext, t.point, "type=ext")
-		ch <- newResult(t.name, s.err, t.point, "type=err")
-		ch <- newResult(t.name, s.setting, t.point, "type=settings")
-		ch <- newResult(t.name, s.login, t.point, "type=login")
+		ch <- newResult(t.name, s.db, p, "type=db")
+		ch <- newResult(t.name, s.file, p, "type=file")
+		ch <- newResult(t.name, s.cache, p, "type=cache")
+		ch <- newResult(t.name, s.ext, p, "type=ext")
+		ch <- newResult(t.name, s.err, p, "type=err")
+		ch <- newResult(t.name, s.setting, p, "type=settings")
+		ch <- newResult(t.name, s.login, p, "type=login")
 		return nil
 	}), nil
 }
 
-func (m dsnmap) taskMysqlCachedPages(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
+func (m dsnmap) taskMysqlCachedPages(name string, d time.Duration, ch chan<- *result, p *point, opts map[string]string) (*task, error) {
 	dbent, err := m.mysqlInit(opts)
 	if err != nil {
 		return nil, err
@@ -105,33 +105,33 @@ func (m dsnmap) taskMysqlCachedPages(name string, d time.Duration, p *point, opt
 		table = "cf_cache_pages_tags"
 	}
 	db := newMysql(dbent, table)
-	return newTask(name, d, p, func(ch chan<- *result, t *task) error {
+	return newTask(name, d, func(t *task) error {
 		n, err := db.cached()
 		if err != nil {
 			return err
 		}
-		ch <- newResult(t.name, n, t.point, "")
+		ch <- newResult(t.name, n, p, "")
 		return nil
 	}), nil
 }
 
-func (m dsnmap) taskMysqlConn(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
+func (m dsnmap) taskMysqlConn(name string, d time.Duration, ch chan<- *result, p *point, opts map[string]string) (*task, error) {
 	dbent, err := m.mysqlInit(opts)
 	if err != nil {
 		return nil, err
 	}
 	db := newMysql(dbent, "")
-	return newTask(name, d, p, func(ch chan<- *result, t *task) error {
+	return newTask(name, d, func(t *task) error {
 		n, err := db.conn()
 		if err != nil {
 			return err
 		}
-		ch <- newResult(t.name, n, t.point, "")
+		ch <- newResult(t.name, n, p, "")
 		return nil
 	}), nil
 }
 
-func taskCountNewlines(name string, d time.Duration, p *point, opts map[string]string) (*task, error) {
+func taskCountNewlines(name string, d time.Duration, ch chan<- *result, p *point, opts map[string]string) (*task, error) {
 	dir, ok := opts["dir"]
 	if !ok {
 		return nil, fmt.Errorf("required option 'dir'")
@@ -144,17 +144,17 @@ func taskCountNewlines(name string, d time.Duration, p *point, opts map[string]s
 	if err != nil {
 		return nil, fmt.Errorf("cannot init log file reader: %s", err)
 	}
-	return newTask(name, d, p, func(ch chan<- *result, t *task) error {
+	return newTask(name, d, func(t *task) error {
 		n, err := rlog.count()
 		if err != nil {
 			return err
 		}
-		ch <- newResult(t.name, n, t.point, "")
+		ch <- newResult(t.name, n, p, "")
 		return nil
 	}), nil
 }
 
-type taskMaker func(name string, every time.Duration, point *point, opts map[string]string) (*task, error)
+type taskMaker func(name string, every time.Duration, ch chan<- *result, point *point, opts map[string]string) (*task, error)
 
 type tasks map[string]taskMaker
 
@@ -170,7 +170,7 @@ func makeTasks(dsn dsnmap) tasks {
 	}
 }
 
-func (ts tasks) setup(task string, every time.Duration, p *point, opts map[string]string) (*task, error) {
+func (ts tasks) setup(task string, every time.Duration, ch chan<- *result, p *point, opts map[string]string) (*task, error) {
 	fn, ok := ts[task]
 	if !ok {
 		return nil, errors.New("not a valid task")
@@ -187,7 +187,7 @@ func (ts tasks) setup(task string, every time.Duration, p *point, opts map[strin
 	if !ok {
 		name = task
 	}
-	t, err := fn(name, every, p, opts)
+	t, err := fn(name, every, ch, p, opts)
 	if err != nil {
 		return nil, err
 	}

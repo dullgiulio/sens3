@@ -48,7 +48,7 @@ func parseChecks(s string) (checks, error) {
 
 type products map[string]checks
 
-func initProducts(hostname string, every time.Duration, prods products, dsn dsnmap) ([]*task, error) {
+func initProducts(hostname string, every time.Duration, ch chan<- *result, prods products, dsn dsnmap) ([]*task, error) {
 	ts := make([]*task, 0)
 	tsmap := makeTasks(dsn)
 	for name, checks := range prods {
@@ -59,7 +59,7 @@ func initProducts(hostname string, every time.Duration, prods products, dsn dsnm
 		point := &point{hostname, parts[0], parts[1]}
 		for _, opts := range checks {
 			cname := opts[""]
-			t, err := tsmap.setup(cname, every, point, opts)
+			t, err := tsmap.setup(cname, every, ch, point, opts)
 			if err != nil {
 				return nil, fmt.Errorf("%s: task %s: %s", name, cname, err)
 			}

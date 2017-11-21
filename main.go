@@ -34,14 +34,14 @@ func configure() (*scheduler, *results, error) {
 		}
 	}
 	results := newResults(os.Stdout)
-	ts, err := initProducts(*hostname, *every, prods, dsnmap)
+	ts, err := initProducts(*hostname, *every, results.ch, prods, dsnmap)
 	if err != nil {
 		return nil, nil, fmt.Errorf("cannot init tasks: %v", err)
 	}
 	if len(ts) == 0 {
 		return nil, nil, fmt.Errorf("no tasks to run, exiting")
 	}
-	return newScheduler(results.ch, ts, *nworkers), results, nil
+	return newScheduler(ts, *nworkers), results, nil
 }
 
 func main() {
