@@ -16,7 +16,7 @@ chat.prod:logcat,dir=/var/log,match=access_log,logcat,dir=/var/log,match=error_l
 
 ## Measurements
 
-Available measurements and their optiosn with default values.
+Available measurements and their options with default values.
 
 * proc (name=procs, every=1m, dir=/proc, match=httpd)
 * load (name=load, every=1m)
@@ -25,6 +25,7 @@ Available measurements and their optiosn with default values.
 * dbconn (name=dbconn, every=1m, db=null)
 * logcat (name=logcat, every=1m, dir=empty, match=access_log)
 * syslog (name=syslog, every=1m, db=null)
+* log (...)
 
 ## Usage
 

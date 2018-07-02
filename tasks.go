@@ -140,7 +140,8 @@ func taskCountNewlines(name string, d time.Duration, ch chan<- *result, p *point
 	if !ok {
 		match = "access_log"
 	}
-	rlog, err := newRlog(dir, match)
+	contains := []byte(opts["contains"])
+	rlog, err := newRlog(dir, match, contains)
 	if err != nil {
 		return nil, fmt.Errorf("cannot init log file reader: %s", err)
 	}

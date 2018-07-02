@@ -13,14 +13,15 @@ import (
 )
 
 type rlog struct {
-	dir   string
-	match string
-	fname string
-	pos   int64
-	last  time.Time
+	dir    string
+	fmatch string
+	cmatch []byte
+	fname  string
+	pos    int64
+	last   time.Time
 }
 
-func newRlog(dir, match string) (*rlog, error) {
+func newRlog(dir, fmatch string, cmatch []byte) (*rlog, error) {
 	fi, err := os.Stat(dir)
 	if err != nil {
 		return nil, fmt.Errorf("invalid directory for log files: %s", err)
@@ -29,9 +30,10 @@ func newRlog(dir, match string) (*rlog, error) {
 		return nil, fmt.Errorf("invalid directory for log files: %s is not a directory", dir)
 	}
 	r := &rlog{
-		dir:   dir,
-		match: match,
-		last:  time.Now(),
+		dir:    dir,
+		fmatch: fmatch,
+		cmatch: cmatch,
+		last:   time.Now(),
 	}
 	latestFile, err := r.lastMod()
 	if err != nil {
@@ -58,7 +60,7 @@ func (r *rlog) lastMod() (string, error) {
 	for _, fi := range files {
 		fmod := fi.ModTime()
 		name := fi.Name()
-		if !strings.HasPrefix(name, r.match) || strings.HasSuffix(name, ".gz") {
+		if !strings.HasPrefix(name, r.fmatch) || strings.HasSuffix(name, ".gz") {
 			continue
 		}
 		if !mod.After(fmod) {
@@ -67,7 +69,7 @@ func (r *rlog) lastMod() (string, error) {
 		}
 	}
 	if last == "" {
-		return "", fmt.Errorf("there are no files starting with %s in directory %s", r.match, r.dir)
+		return "", fmt.Errorf("there are no files starting with %s in directory %s", r.fmatch, r.dir)
 	}
 	return filepath.Join(r.dir, last), nil
 }
@@ -93,6 +95,9 @@ func (r *rlog) countLines(fname string, offset int64) (int, int64, error) {
 	for s.Scan() {
 		bs := s.Bytes()
 		offset += int64(len(bs)) + 1
+		if r.cmatch != nil && bytes.Index(bs, r.cmatch) < 0 {
+			continue
+		}
 		begin := bytes.IndexByte(bs, '[')
 		if begin < 0 {
 			continue
